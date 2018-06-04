@@ -1,0 +1,8 @@
+(jbuild_version 1)
+
+(library
+ ((name        mirage_net_impl)
+  (public_name mirage-net-impl)
+  (libraries (lwt mirage-net-lwt logs cstruct mirage-esp32))
+  (wrapped false)
+  ))
