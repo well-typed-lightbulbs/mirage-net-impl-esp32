@@ -16,7 +16,7 @@ depends: [
     "lwt-esp32" {>= "1.0.0"}
     "logs-esp32" 
     "cstruct-esp32" 
-    "mirage-esp32"
+    "mirage-impl-esp32"
     "ocaml-esp32"
     "mirage-net-lwt-esp32"
 ]
