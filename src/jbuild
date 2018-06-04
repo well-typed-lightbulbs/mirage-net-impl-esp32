@@ -3,6 +3,6 @@
 (library
  ((name        mirage_net_impl)
   (public_name mirage-net-impl)
-  (libraries (lwt mirage-net-lwt logs cstruct mirage-esp32))
+  (libraries (lwt mirage-net-lwt logs cstruct mirage-impl-esp32))
   (wrapped false)
   ))
