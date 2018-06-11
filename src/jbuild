@@ -3,6 +3,7 @@
 (library
  ((name        mirage_net_impl)
   (public_name mirage-net-impl)
+  (c_names   (netif_bindings))
   (libraries (lwt mirage-net-lwt logs cstruct mirage-impl))
   (wrapped false)
   ))

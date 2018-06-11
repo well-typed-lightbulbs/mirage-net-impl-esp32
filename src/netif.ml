@@ -2,6 +2,7 @@ open Result
 open Mirage_net
 open Lwt.Infix
 open OS.Esp32
+open Wifi
 
 (*
  NETWORK INTERFACE FOR ESP32. 
@@ -14,7 +15,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 type +'a io = 'a Lwt.t
 
 type t = {
-  id: string;
+  interface: Wifi.wifi_interface;
   mutable active: bool;
   mac: Macaddr.t;
   stats: stats;
@@ -27,29 +28,37 @@ type error = [
   | `Exn of exn
 ]
 
+(* Get main event group handle and give it to wifi library *)
+external register_wifi_events : unit -> unit = "ml_register_wifi_events"
+
+(* Initialize wifi library and connect to mirage event manager *)
+let () =
+  match Wifi.initialize () with 
+  | Ok _ -> 
+    begin
+      register_wifi_events ();
+      let wifi_evt = Wifi.([STA_started;AP_started;STA_connected;STA_frame_received;AP_frame_received;])
+      let wifi_evt_id = List.map Wifi.id_of_event wifi_evt in 
+      List.iter OS.Event.register_event_number wifi_evt_id
+    end
+  | Error _ -> failwith "wifi couldn't be initialized"
+
+let if_of_dev = function
+  | "ap" -> Wifi.IF_AP
+  | "sta" -> Wifi.IF_STA
+  | _ -> failwith "No interface has this name."
+
 let pp_error ppf = function
   | #Mirage_net.error as e -> Mirage_net.pp_error ppf e
   | `Invalid_argument      -> Fmt.string ppf "Invalid argument"
   | `Unspecified_error     -> Fmt.string ppf "Unspecified error"
   | `Exn e                 -> Fmt.exn ppf e
 
-type esp32_net_info = {
-  mac_address: string;
-  mtu: int;
-}
-
-external esp32_net_info:
-  unit -> esp32_net_info = "mirage_esp32_net_info"
-external esp32_net_read:
-  Cstruct.buffer -> int -> esp32_result * int = "mirage_esp32_net_read"
-external esp32_net_write:
-  Cstruct.buffer -> int -> esp32_result = "mirage_esp32_net_write"
-
 let devices = Hashtbl.create 1
 
 let connect devname =
-  let ni = esp32_net_info () in
-  match Macaddr.of_bytes ni.mac_address with
+  let macaddr = Wifi.get_mac (if_of_dev devname) in
+  match Macaddr.of_bytes macaddr with
   | None -> Lwt.fail_with "Netif: Could not get MAC address"
   | Some mac ->
      Log.info (fun f -> f "Plugging into %s with mac %s"
@@ -57,14 +66,16 @@ let connect devname =
      let active = true in
      (* XXX: hook up ni.mtu *)
      let t = {
-         id=devname; active; mac;
+         interface=(if_of_dev devname); active; mac;
          stats= { rx_bytes=0L;rx_pkts=0l; tx_bytes=0L; tx_pkts=0l } }
      in
      Hashtbl.add devices devname t;
      Lwt.return t
 
 let disconnect t =
-  Log.info (fun f -> f "Disconnect %s" t.id);
+  (match t.interface with 
+  | Wifi.IF_AP -> Log.info (fun f -> f "Disconnect access point")
+  | Wifi.IF_STA -> Log.info (fun f -> f "Disconnect station"));
   t.active <- false;
   Lwt.return_unit
 
@@ -74,23 +85,27 @@ type buffer = Cstruct.t
 
 (* Input a frame, and block if nothing is available *)
 let rec read t buf =
+  let evt = match t.interface with 
+    | Wifi.IF_AP -> Wifi.AP_frame_received
+    | Wifi.IF_STA -> Wifi.STA_frame_received 
+  and
   let process () =
-    let r = match esp32_net_read buf.Cstruct.buffer buf.Cstruct.len with
-      | (ESP32_OK, len)    ->
+    let r = match Wifi.read t.interface buf.Cstruct.buffer buf.Cstruct.len with
+      | Ok len    ->
         t.stats.rx_pkts <- Int32.succ t.stats.rx_pkts;
         t.stats.rx_bytes <- Int64.add t.stats.rx_bytes (Int64.of_int len);
         let buf = Cstruct.sub buf 0 len in
         Ok buf
-      | (ESP32_AGAIN, _)   -> Error `Continue
-      | (ESP32_EINVAL, _)  -> Error `Invalid_argument
-      | (ESP32_EUNSPEC, _) -> Error `Unspecified_error
+      | Error Wifi.Nothing_to_read   -> Error `Continue
+      | Error Wifi.Unspecified  -> Error `Unspecified_error
+      | Error _  -> assert false
     in
     Lwt.return r
   in
   process () >>= function
   | Ok buf                   -> Lwt.return (Ok buf)
   | Error `Continue          ->
-    OS.Main.wait_for_work () >>= fun () -> read t buf
+    OS.Event.wait_for_event (Wifi.id_of_event evt) >>= fun () -> read t buf
   | Error `Canceled          -> Lwt.return (Error `Canceled)
   | Error `Invalid_argument  -> Lwt.return (Error `Invalid_argument)
   | Error `Unspecified_error -> Lwt.return (Error `Unspecified_error)
@@ -127,14 +142,15 @@ let rec listen t fn =
 (* Transmit a packet from a Cstruct.t *)
 let write t buf =
   let open Cstruct in
-  let r = match esp32_net_write buf.buffer buf.len with
-    | ESP32_OK      ->
+  let r = match Wifi.write t.interface buf.buffer buf.len with
+    | Ok _      ->
       t.stats.tx_pkts <- Int32.succ t.stats.tx_pkts;
       t.stats.tx_bytes <- Int64.add t.stats.tx_bytes (Int64.of_int buf.len);
       Ok ()
-    | ESP32_AGAIN   -> assert false (* Not returned by solo5_net_write() *)
-    | ESP32_EINVAL  -> Error `Invalid_argument
-    | ESP32_EUNSPEC -> Error `Unspecified_error
+    | Error Wifi.Invalid_argument  -> Error `Invalid_argument
+    | Error Wifi.Unspecified -> Error `Unspecified_error
+    | Error _   -> assert false 
+    
   in
   Lwt.return r
 
