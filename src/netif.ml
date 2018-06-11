@@ -2,7 +2,6 @@ open Result
 open Mirage_net
 open Lwt.Infix
 open OS.Esp32
-open Wifi
 
 (*
  NETWORK INTERFACE FOR ESP32. 
@@ -34,10 +33,10 @@ external register_wifi_events : unit -> unit = "ml_register_wifi_events"
 (* Initialize wifi library and connect to mirage event manager *)
 let () =
   match Wifi.initialize () with 
-  | Ok _ -> 
+  | Ok _ ->
     begin
       register_wifi_events ();
-      let wifi_evt = Wifi.([STA_started;AP_started;STA_connected;STA_frame_received;AP_frame_received;])
+      let wifi_evt = Wifi.([STA_started;AP_started;STA_connected;STA_frame_received;AP_frame_received;]) in
       let wifi_evt_id = List.map Wifi.id_of_event wifi_evt in 
       List.iter OS.Event.register_event_number wifi_evt_id
     end
@@ -58,7 +57,7 @@ let devices = Hashtbl.create 1
 
 let connect devname =
   let macaddr = Wifi.get_mac (if_of_dev devname) in
-  match Macaddr.of_bytes macaddr with
+  match Macaddr.of_bytes (Bytes.to_string macaddr) with
   | None -> Lwt.fail_with "Netif: Could not get MAC address"
   | Some mac ->
      Log.info (fun f -> f "Plugging into %s with mac %s"
@@ -89,7 +88,7 @@ let rec read t buf =
     | Wifi.IF_AP -> Wifi.AP_frame_received
     | Wifi.IF_STA -> Wifi.STA_frame_received 
   and
-  let process () =
+  process () =
     let r = match Wifi.read t.interface buf.Cstruct.buffer buf.Cstruct.len with
       | Ok len    ->
         t.stats.rx_pkts <- Int32.succ t.stats.rx_pkts;
@@ -100,7 +99,7 @@ let rec read t buf =
       | Error Wifi.Unspecified  -> Error `Unspecified_error
       | Error _  -> assert false
     in
-    Lwt.return r
+    Lwt.return r 
   in
   process () >>= function
   | Ok buf                   -> Lwt.return (Ok buf)

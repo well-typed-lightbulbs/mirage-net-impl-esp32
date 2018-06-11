@@ -17,7 +17,7 @@
 #include <esp_timer.h>
 
 
-extern mirage_event_group;
+extern EventGroupHandle_t mirage_event_group;
 void wifi_set_event_group(EventGroupHandle_t event_group, int offset);
 
 CAMLprim value
