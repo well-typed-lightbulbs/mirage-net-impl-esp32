@@ -55,8 +55,22 @@ let pp_error ppf = function
 
 let devices = Hashtbl.create 1
 
+let if_ap = ref false 
+let if_sta = ref false
+
+let set_wifi_mode () = ignore (match(!if_ap, !if_sta) with 
+  | true, true -> Wifi.set_mode Wifi.MODE_APSTA
+  | false, true -> Wifi.set_mode Wifi.MODE_STA 
+  | true, false -> Wifi.set_mode Wifi.MODE_AP
+  | false, false -> assert false)
+
 let connect devname =
   let macaddr = Wifi.get_mac (if_of_dev devname) in
+  let _ = match (if_of_dev devname) with
+  | Wifi.IF_AP -> if_ap := true
+  | Wifi.IF_STA -> if_sta := true
+  in
+  set_wifi_mode ();
   match Macaddr.of_bytes (Bytes.to_string macaddr) with
   | None -> Lwt.fail_with "Netif: Could not get MAC address"
   | Some mac ->
@@ -76,6 +90,10 @@ let disconnect t =
   | Wifi.IF_AP -> Log.info (fun f -> f "Disconnect access point")
   | Wifi.IF_STA -> Log.info (fun f -> f "Disconnect station"));
   t.active <- false;
+  (match (t.interface) with
+  | Wifi.IF_AP -> if_ap := false
+  | Wifi.IF_STA -> if_sta := false);
+  set_wifi_mode ();
   Lwt.return_unit
 
 type macaddr = Macaddr.t
