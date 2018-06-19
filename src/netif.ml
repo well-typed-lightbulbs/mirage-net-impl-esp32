@@ -36,7 +36,7 @@ let () =
   | Ok _ ->
     begin
       register_wifi_events ();
-      let wifi_evt = Wifi.([STA_started;AP_started;STA_connected;STA_frame_received;AP_frame_received;]) in
+      let wifi_evt = Wifi.([STA_started;STA_stopped;AP_started;AP_stopped;STA_connected;STA_disconnected;STA_frame_received;AP_frame_received;]) in
       let wifi_evt_id = List.map Wifi.id_of_event wifi_evt in 
       List.iter OS.Event.register_event_number wifi_evt_id
     end
